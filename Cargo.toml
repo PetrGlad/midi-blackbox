@@ -1,0 +1,28 @@
+[package]
+name = "midi-blackbox"
+version = "0.0.1"
+edition = "2021"
+authors = ["Petr <petrglad@gmail.com>"]
+description = "A background MIDI recorder/archiver."
+homepage = "https://github.com/PetrGlad/midi-blackbox"
+
+# See also https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.dev]
+panic = 'abort'
+
+[dependencies]
+# https://github.com/negamartin/midly
+midly = { version = "0.5.3", features = ["alloc"] }
+
+# https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
+midir = "0.10.0"
+
+clap = { version = "4.5.23", features = ["cargo"] }
+chrono = "0.4.39"
+signal-hook = "0.4.3"
+
+# log = "0.4.22"
+# env_logger = "0.11.6"
+# clap_complete = "4.5.40"
+# dirs = "6"
