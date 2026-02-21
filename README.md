@@ -20,15 +20,29 @@ The recorded files layout is as follows:
 
 Since MIDI files take very litlle space the program does not have any storage limits.
 
-# Usage
+## Usage
 
 `midi-blackbox --help` - should give brief help message.
 
 `midi-blackbox --list` - list available sequencer ports. 
 
 
+## Build
 
-## Example
+ALSA wrapper dependency (used for MIDI input)
+`apt install libasound2-dev`.
+
+### Cross complilation for RaspberryPi
+
+Building binary for RaspberryPi on a x86 computer:
+
+```shell
+cargo install cross --git https://github.com/cross-rs/cross
+sudo apt-get install --yes podman-docker
+CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 cross build --release
+```
+
+### Example
 ```
 $ midi-blackbox --list
 Available MIDI input ports:
@@ -38,11 +52,7 @@ Available MIDI input ports:
 ```
 
 
-
-
-
-
-# History
+## History
 
 Similar "Archive" function that existed in Pianoteq synthesiser when it was launched as a stand-alone program.
 This function was removed recently so I have created a replacement.

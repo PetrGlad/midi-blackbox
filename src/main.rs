@@ -257,7 +257,7 @@ fn main() {
                 .long("archive-dir")
                 .value_name("FILE")
                 .help(
-                    "Root directory where recorded MIDI files will be stored.\
+                    "Root directory where recorded MIDI files should be stored.\
                           Will be created if it does not exist.",
                 )
                 .value_parser(clap::value_parser!(PathBuf))
