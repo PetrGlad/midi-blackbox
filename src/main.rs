@@ -1,11 +1,13 @@
 use chrono::{DateTime, Datelike, Local};
 use clap::{Arg, Command};
-use midir::{MidiInput, MidiInputPort};
+use log::LevelFilter;
+use midir::{MidiInput, MidiInputConnection, MidiInputPort};
 use midly::live::LiveEvent;
 use midly::num::u28;
-use midly::{Format, Header, Smf, Timing, Track, TrackEvent, TrackEventKind};
+use midly::{Format, Header, MidiMessage, Smf, Timing, Track, TrackEvent, TrackEventKind};
 use signal_hook::consts::signal::*;
 use signal_hook::flag;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
@@ -24,6 +26,49 @@ struct RecordingSession {
     last_event_time: Option<Instant>,
     usec_per_tick: u32,
     events: Vec<TrackEvent<'static>>,
+
+    // For pause detection
+    active_lanes: HashSet<Lane>,
+}
+
+#[derive(Debug, Hash, PartialEq, Eq)]
+enum LaneType {
+    Note,
+    Cc,
+}
+
+// Channel, cc/midi, controller/note
+#[derive(Debug, Hash, PartialEq, Eq)]
+struct Lane(u8, LaneType, u8);
+
+impl Lane {
+    // See https://anotherproducer.com/online-tools-for-musicians/midi-cc-list/
+    const PEDALS: [u8; 6] = [64, 65, 66, 67, 68, 69];
+
+    fn index(ev: TrackEventKind) -> Option<(bool, Lane)> {
+        match ev {
+            TrackEventKind::Midi { channel, message } => match message {
+                MidiMessage::NoteOn { key, .. } => {
+                    Some((true, Lane(channel.as_int(), LaneType::Note, key.as_int())))
+                }
+                MidiMessage::NoteOff { key, .. } => {
+                    Some((false, Lane(channel.as_int(), LaneType::Note, key.as_int())))
+                }
+                MidiMessage::Controller { controller, value } => {
+                    if Self::PEDALS.contains(&controller.as_int()) {
+                        Some((
+                            value >= 64,
+                            Lane(channel.as_int(), LaneType::Cc, controller.as_int()),
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 impl RecordingSession {
@@ -33,6 +78,7 @@ impl RecordingSession {
             last_event_time: None,
             usec_per_tick: DEFAULT_USEC_PER_TICK,
             events: Vec::new(),
+            active_lanes: HashSet::new(),
         }
     }
 
@@ -55,6 +101,15 @@ impl RecordingSession {
                 delta: u28::from(delta_ticks),
                 kind,
             });
+
+            if let Some((on, lane)) = Lane::index(kind) {
+                if on {
+                    self.active_lanes.insert(lane);
+                } else {
+                    self.active_lanes.remove(&lane);
+                }
+                log::debug!("Active lanes {:?}", self.active_lanes)
+            }
         }
     }
 
@@ -63,8 +118,8 @@ impl RecordingSession {
     ) -> Option<TrackEventKind<'static>> {
         match event {
             LiveEvent::Midi { channel, message } => Some(TrackEventKind::Midi { channel, message }),
-            LiveEvent::Common(_) => None, // Skip common events for now
-            LiveEvent::Realtime(_) => None, // Skip realtime events
+            LiveEvent::Common(_) => None,
+            LiveEvent::Realtime(_) => None,
         }
     }
 
@@ -88,14 +143,14 @@ impl RecordingSession {
     fn save_to_file(&mut self, directory: &PathBuf) -> std::io::Result<()> {
         if self.first_event_time.is_none() {
             assert!(self.events.is_empty());
-            println!("\nNo events, skipping save.");
+            log::info!("No more events, skipping save.");
             return Ok(());
         }
         assert!(!self.events.is_empty() && self.last_event_time.is_some());
         let file_time = chrono::Local::now();
         let file_path = Self::target_directory(directory, file_time)?.join(format!(
             "{}-{}e-{}s.mid",
-            file_time.format("%Y-%m-%d_%H:%M:%S"),
+            file_time.format("%FT%H:%M:%S%Z"),
             self.events.len() + 1, // + EndOfTrack
             self.last_event_time
                 .unwrap()
@@ -125,7 +180,7 @@ impl RecordingSession {
             )
         })?;
 
-        println!("\nWriting recording to {:}", &file_path.display());
+        log::info!("Writing recording to {:}", &file_path.display());
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true) // Do not overwrite.
@@ -151,7 +206,7 @@ fn list_midi_inputs() -> Result<(), Box<dyn std::error::Error>> {
     if ports.is_empty() {
         println!("No MIDI input ports available.");
     } else {
-        println!("Available MIDI input ports:\n");
+        println!("Available MIDI input ports {}:\n", &ports.len());
         for port in ports {
             let name = midi_input.port_name(&port)?;
             println!("\t{}", name);
@@ -160,71 +215,112 @@ fn list_midi_inputs() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn do_recording(
+fn recording_loop(
     port_name_prefix: &str,
     output_path: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let stop = Arc::new(AtomicBool::new(false));
+    flag::register(SIGINT, Arc::clone(&stop))?;
+
+    // Only stop on clean exit. This helps to survive temporary conditions like controller
+    // not yet connected or temporarily disconnected.
+    let retry_delay = Duration::from_secs(4);
+    while let Err(err) = do_recording(stop.clone(), port_name_prefix, output_path.to_owned()) {
+        log::error!("Error: {}", err);
+        if stop.load(Ordering::Relaxed) {
+            println!();
+            break;
+        }
+        log::info!(
+            "Waiting for {} seconds before retry.",
+            retry_delay.as_secs()
+        );
+        std::thread::sleep(retry_delay);
+    }
+    Ok(())
+}
+
+fn do_recording(
+    stop: Arc<AtomicBool>,
+    port_name_prefix: &str,
+    output_path: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (_connection, session) = init_session(port_name_prefix)?;
+
+    log::info!("Recording... Press Ctrl+C to stop.");
+    while !stop.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_secs(1));
+        if let Ok(mut session) = session.try_lock() {
+            if let Some(t) = session.last_event_time {
+                if Instant::now().duration_since(t) > Duration::from_secs(8)
+                    && session.active_lanes.is_empty()
+                {
+                    session.save_to_file(&output_path)?;
+                }
+            }
+        }
+        // If a controller is disconnected, there are no errors. The events just stop coming.
+        // Force reinitialization once in a while.
+        // session.refresh()?;
+        list_midi_inputs()?;
+    }
+
+    session.lock().unwrap().save_to_file(&output_path)?;
+
+    log::info!("Bye.");
+    Ok(())
+}
+
+fn init_session(
+    port_name_prefix: &str,
+) -> Result<(MidiInputConnection<()>, Arc<Mutex<RecordingSession>>), Box<dyn Error>> {
     let midi_input = MidiInput::new(PACKAGE_NAME)?;
 
-    let selected_port = select_port(port_name_prefix, &midi_input)?;
+    let selected_port = select_port(&midi_input, port_name_prefix)?;
     let port = selected_port
         .ok_or_else(|| format!("No MIDI input port found matching '{}'", port_name_prefix))?;
 
     let session = Arc::new(Mutex::new(RecordingSession::new()));
     let session_clone = session.clone();
 
-    println!("Recording...");
-    println!("Press Ctrl+C to stop.\n");
+    // FIXME Refresh connection if it is invalid. With current all events are lost after
+    //   controller re-connection. Do not see how to do it with midir. Probably have to use
+    //   alsa API instead.
 
-    let _connection = midi_input.connect(
+    let connection = midi_input.connect(
         &port,
         PACKAGE_NAME,
         move |timestamp, message, _| {
             // Skip active sensing and clock messages
             if message[0] == 0xFE || message[0] == 0xF8 {
+                log::debug!("## event {:?}", message);
                 return;
             }
 
             if let Ok(live_event) = LiveEvent::parse(message) {
                 let static_event = live_event.to_static();
-                println!("@ {}: {:?}", timestamp, static_event);
+                log::debug!("@ {}: {:?}", timestamp, static_event);
 
                 let mut session = session_clone.lock().unwrap();
                 session.add_event(static_event);
+            } else {
+                log::debug!("# event {:?}", message);
             }
         },
         (),
     )?;
-
-    let stop = Arc::new(AtomicBool::new(false));
-    flag::register(SIGINT, Arc::clone(&stop))?;
-
-    while !stop.load(Ordering::Relaxed) {
-        std::thread::sleep(Duration::from_secs(1));
-        if let Ok(mut session) = session.try_lock() {
-            if let Some(t) = session.last_event_time {
-                if Instant::now().duration_since(t) > Duration::from_secs(8) {
-                    session.save_to_file(&output_path)?;
-                }
-            }
-        }
-    }
-
-    session.lock().unwrap().save_to_file(&output_path)?;
-
-    println!("Bye.");
-    Ok(())
+    Ok((connection, session))
 }
 
 fn select_port(
-    port_name_prefix: &str,
     midi_input: &MidiInput,
-) -> Result<Option<MidiInputPort>, Box<dyn Error>> {
+    port_name_prefix: &str,
+) -> Result<Option<MidiInputPort>, Box<dyn std::error::Error>> {
     let ports = midi_input.ports();
     for port in &ports {
         let name = midi_input.port_name(port)?;
         if name.starts_with(port_name_prefix.trim()) {
-            println!("Selected MIDI input: '{}'", name);
+            log::info!("Selected MIDI input port: '{}'", name);
             return Ok(Some(port.clone()));
         }
     }
@@ -232,6 +328,12 @@ fn select_port(
 }
 
 fn main() {
+    // TODO (refactoring) Replace pringln with log wherever it makes sense.
+    env_logger::builder()
+        .filter_level(LevelFilter::Trace)
+        .init();
+    log::debug!("Checking logger works"); // DEBUG
+
     let matches = Command::new(PACKAGE_NAME)
         .version(env!("CARGO_PKG_VERSION"))
         .author("Petr Gladkikh")
@@ -274,7 +376,7 @@ fn main() {
             .unwrap()
             .clone();
 
-        do_recording(port_prefix, output_path)
+        recording_loop(port_prefix, output_path)
     };
 
     if let Err(e) = result {
