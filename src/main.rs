@@ -6,7 +6,6 @@ use midly::num::u28;
 use midly::{Format, Header, Smf, Timing, Track, TrackEvent, TrackEventKind};
 use signal_hook::consts::signal::*;
 use signal_hook::flag;
-use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -14,6 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{fs, io};
+use std::error::Error;
 
 const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 const DEFAULT_USEC_PER_TICK: u32 = 500; // 120 BPM with 1000 ticks per beat
@@ -160,10 +160,56 @@ fn list_midi_inputs() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn do_recording(
+fn recording_loop(
     port_name_prefix: &str,
     output_path: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let stop = Arc::new(AtomicBool::new(false));
+    flag::register(SIGINT, Arc::clone(&stop))?;
+
+    // Only stop on clean exit. This helps to survive temporary conditions like controller
+    // not yet connected or temporarily disconnected.
+    let retry_delay = Duration::from_secs(4);
+    while let Err(err) = do_recording(stop.clone(), port_name_prefix, output_path.to_owned()) {
+        println!("Error: {}", err);
+        println!("Waiting for {} seconds before retry.", retry_delay.as_secs());
+        std::thread::sleep(retry_delay);
+    }
+    Ok(())
+}
+
+fn do_recording(
+    stop: Arc<AtomicBool>,
+    port_name_prefix: &str,
+    output_path: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut session = init_session(port_name_prefix)?;
+
+    println!("Recording...");
+    println!("Press Ctrl+C to stop.\n");
+
+
+    while !stop.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_secs(1));
+        if let Ok(mut session) = session.try_lock() {
+            if let Some(t) = session.last_event_time {
+                if Instant::now().duration_since(t) > Duration::from_secs(8) {
+                    session.save_to_file(&output_path)?;
+                }
+            }
+        }
+        // If a controller is disconnected, there are no errors. The events just stop coming.
+        // FOrce reinitialization once in a while.
+        session.refresh()?;
+    }
+
+    session.lock().unwrap().save_to_file(&output_path)?;
+
+    println!("Bye.");
+    Ok(())
+}
+
+fn init_session(port_name_prefix: &str) -> Result<Arc<Mutex<RecordingSession>>, Box<dyn Error>> {
     let midi_input = MidiInput::new(PACKAGE_NAME)?;
 
     let selected_port = select_port(port_name_prefix, &midi_input)?;
@@ -173,8 +219,10 @@ fn do_recording(
     let session = Arc::new(Mutex::new(RecordingSession::new()));
     let session_clone = session.clone();
 
-    println!("Recording...");
-    println!("Press Ctrl+C to stop.\n");
+
+    // FIXME Keep connection in session?
+    // FIXME Only refresh connection if it is invalid.
+
 
     let _connection = midi_input.connect(
         &port,
@@ -195,31 +243,13 @@ fn do_recording(
         },
         (),
     )?;
-
-    let stop = Arc::new(AtomicBool::new(false));
-    flag::register(SIGINT, Arc::clone(&stop))?;
-
-    while !stop.load(Ordering::Relaxed) {
-        std::thread::sleep(Duration::from_secs(1));
-        if let Ok(mut session) = session.try_lock() {
-            if let Some(t) = session.last_event_time {
-                if Instant::now().duration_since(t) > Duration::from_secs(8) {
-                    session.save_to_file(&output_path)?;
-                }
-            }
-        }
-    }
-
-    session.lock().unwrap().save_to_file(&output_path)?;
-
-    println!("Bye.");
-    Ok(())
+    Ok(session)
 }
 
 fn select_port(
     port_name_prefix: &str,
     midi_input: &MidiInput,
-) -> Result<Option<MidiInputPort>, Box<dyn Error>> {
+) -> Result<Option<MidiInputPort>, Box<dyn std::error::Error>> {
     let ports = midi_input.ports();
     for port in &ports {
         let name = midi_input.port_name(port)?;
@@ -274,7 +304,7 @@ fn main() {
             .unwrap()
             .clone();
 
-        do_recording(port_prefix, output_path)
+        recording_loop(port_prefix, output_path)
     };
 
     if let Err(e) = result {
