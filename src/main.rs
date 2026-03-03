@@ -245,7 +245,9 @@ fn do_recording(
     port_name_prefix: &str,
     output_path: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (_connection, session) = init_session(port_name_prefix)?;
+    let session = Arc::new(Mutex::new(RecordingSession::new()));
+    let disconnected = Arc::new(AtomicBool::new(false));
+    let mut connection = connect(port_name_prefix, session.clone(), disconnected.to_owned())?;
 
     log::info!("Recording... Press Ctrl+C to stop.");
     while !stop.load(Ordering::Relaxed) {
@@ -259,38 +261,46 @@ fn do_recording(
                 }
             }
         }
-        // If a controller is disconnected, there are no errors. The events just stop coming.
-        // Force reinitialization once in a while.
-        // session.refresh()?;
-        list_midi_inputs()?;
+        if disconnected.load(Ordering::Relaxed) {
+            connection = connect(port_name_prefix, session.clone(), disconnected.to_owned())?;
+        }
     }
-
+    connection.close();
     session.lock().unwrap().save_to_file(&output_path)?;
 
     log::info!("Bye.");
     Ok(())
 }
 
-fn init_session(
+fn connect(
     port_name_prefix: &str,
-) -> Result<(MidiInputConnection<()>, Arc<Mutex<RecordingSession>>), Box<dyn Error>> {
+    session: Arc<Mutex<RecordingSession>>,
+    disconnected: Arc<AtomicBool>,
+) -> Result<MidiInputConnection<()>, Box<dyn Error>> {
     let midi_input = MidiInput::new(PACKAGE_NAME)?;
 
     let selected_port = select_port(&midi_input, port_name_prefix)?;
     let port = selected_port
         .ok_or_else(|| format!("No MIDI input port found matching '{}'", port_name_prefix))?;
 
-    let session = Arc::new(Mutex::new(RecordingSession::new()));
     let session_clone = session.clone();
-
-    // FIXME Refresh connection if it is invalid. With current all events are lost after
-    //   controller re-connection. Do not see how to do it with midir. Probably have to use
-    //   alsa API instead.
-
     let connection = midi_input.connect(
         &port,
         PACKAGE_NAME,
         move |timestamp, message, _| {
+            /* WARNING: Using patched versio of `midir` to detect controller disconnection
+               with alsa backend (see git sub-module).
+               Upstream version just silently stops receiving events without any way
+               to detect this situation.
+               This can be handled in a more straightforward way by using alsa-rs directly,
+               but that would require is a lot more work, and we'll lose portability.
+
+               Upon port unsubscription patched midir returns empty data vector here.
+             */
+            if message.is_empty() {
+                disconnected.store(true, Ordering::Relaxed);
+                return;
+            }
             // Skip active sensing and clock messages
             if message[0] == 0xFE || message[0] == 0xF8 {
                 log::debug!("## event {:?}", message);
@@ -309,7 +319,7 @@ fn init_session(
         },
         (),
     )?;
-    Ok((connection, session))
+    Ok(connection)
 }
 
 fn select_port(

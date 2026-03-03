@@ -1,0 +1,4 @@
+[submodule "libs/midir"]
+	path = libs/midir
+	url = git@github.com:PetrGlad/midir.git
+	branch = disconnect-handling

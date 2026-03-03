@@ -16,7 +16,8 @@ panic = 'abort'
 midly = { version = "0.5.3", features = ["alloc"] }
 
 # https://docs.rs/midir/0.7.0/midir/struct.MidiInput.html
-midir = "0.10.0"
+#midir = "0.10.3"
+midir = { path = "libs/midir" }
 
 clap = { version = "4.5.23", features = ["cargo"] }
 chrono = "0.4.39"
