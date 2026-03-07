@@ -5,18 +5,18 @@ It can be useful in studio to avoid losing good ideas or takes, or for musicians
 to hear back their performances for practice or sharing.
 
 The program records events continuously, and writes file after a pause is detected or program is stopped.
-This means you can launch this program and forget about it. But when you need to get a recording of your performance, 
+This means you can launch this program and forget about it. But when you need to get a recording of your performance,
 that recording can be found in the archive.
 
 This program only records MIDI events, and does not do any sound processing.
 So usual setup would be to launch this program along with your DAW or sound synthesyser software for audition.
 
-The recorded files layout is as follows: 
-* Your Archive Root Direcotry 
-  * Year 
-    * Month 
+The recorded files layout is as follows:
+* Your Archive Root Direcotry
+  * Year
+    * Month
       * Day
-        * datetime-number_of_events-dureation.mid 
+        * datetime-number_of_events-dureation.mid
 
 Since MIDI files take very litlle space the program does not have any storage limits.
 
@@ -24,10 +24,14 @@ Since MIDI files take very litlle space the program does not have any storage li
 
 `midi-blackbox --help` - should give brief help message.
 
-`midi-blackbox --list` - list available sequencer ports. 
+`midi-blackbox --list` - list available sequencer ports.
 
 
 ## Build
+
+Note: currently using patched version of midir library to detect disconnections.
+The patched `midir` is in a git submodule. Use `git submodule update libs/midir/` to fetch it.
+The patched `midir` version is here https://github.com/PetrGlad/midir
 
 ALSA wrapper dependency (used for MIDI input)
 `apt install libasound2-dev`.
@@ -57,10 +61,10 @@ Available MIDI input ports:
 Similar "Archive" function that existed in Pianoteq synthesiser when it was launched as a stand-alone program.
 This function was removed recently so I have created a replacement.
 
-This Program was initially a part of [emmate](https://github.com/PetrGlad/emmate) project but is now extracted 
+This Program was initially a part of [emmate](https://github.com/PetrGlad/emmate) project but is now extracted
 here as it is also useful in itself.
 
-The program is named "blackbox" since its behaviur is somewhat similar to flight data recorders (FDR) which 
+The program is named "blackbox" since its behaviur is somewhat similar to flight data recorders (FDR) which
 also sometimes called "black boxes".
 
 
