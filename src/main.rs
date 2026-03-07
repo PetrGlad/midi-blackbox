@@ -186,7 +186,7 @@ impl RecordingSession {
             .create_new(true) // Do not overwrite.
             .open(&file_path)?;
         file.write_all(&output)?;
-        println!("Wrote {} events.", self.events.len());
+        log::info!("Wrote {} events.", self.events.len());
         self.reset();
 
         Ok(())
@@ -338,16 +338,14 @@ fn select_port(
 }
 
 fn main() {
-    // TODO (refactoring) Replace pringln with log wherever it makes sense.
     env_logger::builder()
         .filter_level(LevelFilter::Trace)
         .init();
-    log::debug!("Checking logger works"); // DEBUG
 
     let matches = Command::new(PACKAGE_NAME)
         .version(env!("CARGO_PKG_VERSION"))
         .author("Petr Gladkikh")
-        .about("Continuously records MIDI events from given MIDI sequencer to file archive.")
+        .about("Continuously records MIDI events from given MIDI port to file archive.")
         .arg(
             Arg::new("list")
                 .short('l')
@@ -390,7 +388,7 @@ fn main() {
     };
 
     if let Err(e) = result {
-        eprintln!("Error: {}", e);
+        log::error!("{}", e);
         std::process::exit(1);
     }
 }
