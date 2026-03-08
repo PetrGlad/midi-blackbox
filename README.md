@@ -9,7 +9,7 @@ This means you can launch this program and forget about it. But when you need to
 that recording can be found in the archive.
 
 This program only records MIDI events, and does not do any sound processing.
-So usual setup would be to launch this program along with your DAW or sound synthesyser software for audition.
+So usual setup would be to launch this program along with your DAW or sound synthesis software for audition.
 
 The recorded files layout is as follows:
 * Your Archive Root Direcotry
@@ -18,7 +18,11 @@ The recorded files layout is as follows:
       * Day
         * datetime-number_of_events-dureation.mid
 
-Since MIDI files take very litlle space the program does not have any storage limits.
+Since MIDI files take very little space the program does not have any storage limits.
+
+## Platform support
+
+Tested on Linux/ALSA (both x86 and ARM). May work on other platforms but I do not have opportunity to check that.
 
 ## Usage
 
@@ -30,7 +34,7 @@ Since MIDI files take very litlle space the program does not have any storage li
 ## Build
 
 Note: currently using patched version of midir library to detect disconnections.
-The patched `midir` is in a git submodule. Use `git submodule update libs/midir/` to fetch it.
+The patched `midir` is in a git submodule. Use `git submodule update --init` to fetch it.
 The patched `midir` version is here https://github.com/PetrGlad/midir
 
 ALSA wrapper dependency (used for MIDI input)
