@@ -16,20 +16,30 @@ The recorded files layout is as follows:
   * Year
     * Month
       * Day
-        * datetime-number_of_events-dureation.mid
+        * datetime-number_of_events-duration.mid
 
 Since MIDI files take very little space the program does not have any storage limits.
 
 ## Platform support
 
-Tested on Linux/ALSA (both x86 and ARM). May work on other platforms but I do not have opportunity to check that.
+I use this program Linux/ALSA (both x86 and ARM/RaspberryPi).
+It may work on other platforms supported by [midir](https://github.com/Boddlnagg/midir)
+but that has not been not tested.
 
 ## Usage
 
-`midi-blackbox --help` - should give brief help message.
+`midi-blackbox --help` - should give brief usage description.
 
-`midi-blackbox --list` - list available sequencer ports.
+### Example
+```
+$ midi-blackbox --list
+Available MIDI input ports:
 
+	Midi Through:Midi Through Port-0 14:0
+	MPK mini 3:MPK mini 3 MIDI 1 20:0
+
+$ midi-blackbox --port "MPK" --archive-dir ~/Music/'MIDI Archive'
+```
 
 ## Build
 
@@ -49,16 +59,6 @@ cargo install cross --git https://github.com/cross-rs/cross
 sudo apt-get install --yes podman-docker
 CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 cross build --release
 ```
-
-### Example
-```
-$ midi-blackbox --list
-Available MIDI input ports:
-
-	Midi Through:Midi Through Port-0 14:0
-	MPK mini 3:MPK mini 3 MIDI 1 20:0
-```
-
 
 ## History
 

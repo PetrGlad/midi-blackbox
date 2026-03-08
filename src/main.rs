@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{fs, io};
 
+
 const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 const DEFAULT_USEC_PER_TICK: u32 = 500; // 120 BPM with 1000 ticks per beat
 const DEFAULT_TICKS_PER_BEAT: u16 = 1000;
@@ -358,7 +359,7 @@ fn main() {
                 .short('p')
                 .long("port")
                 .value_name("PORT_PREFIX")
-                .help("MIDI input port name prefix to use.")
+                .help("Name prefix of MIDI input port to read from.")
                 .required_unless_present("list"),
         )
         .arg(
