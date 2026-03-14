@@ -30,7 +30,8 @@ but that has not been not tested.
 
 `midi-blackbox --help` - should give brief usage description.
 
-### Example
+### Examples
+
 ```
 $ midi-blackbox --list
 Available MIDI input ports:
@@ -41,6 +42,29 @@ Available MIDI input ports:
 $ midi-blackbox --port "MPK" --archive-dir ~/Music/'MIDI Archive'
 ```
 
+If you want to keep an eye on it, you can enable logging
+
+```
+midi-blackbox --port=MPK \
+  --archive-dir=$HOME/Music/midi-archive \
+  --log-level=debug \
+  --log-file=$HOME/Music/midi-archive/recording.log  
+```
+
+### Autostart (on Linux)
+
+To automatically launch the recorder create a `.desktop` file in `$HOME/.config/autostart/`. 
+An example of such `.desktop` file (adjust file paths to suit your environment): 
+```
+[Desktop Entry]
+Type=Application
+Name=MIDI Blackbox
+Exec=/home/your-user-name/bin/midi-blackbox --port "Digital Piano" --archive-dir /home/your-user-name/Music/Archive
+StartupNotify=true
+Terminal=true
+```
+
+
 ## Build
 
 Note: currently using patched version of midir library to detect disconnections.
@@ -50,7 +74,8 @@ The patched `midir` version is here https://github.com/PetrGlad/midir
 ALSA wrapper dependency (used for MIDI input)
 `apt install libasound2-dev`.
 
-### Cross complilation for RaspberryPi
+
+### Cross compilation for RaspberryPi
 
 Building binary for RaspberryPi on a x86 computer:
 

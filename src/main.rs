@@ -12,11 +12,11 @@ use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use std::process::exit;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{fs, io};
-
 
 const PACKAGE_NAME: &str = env!("CARGO_PKG_NAME");
 const DEFAULT_USEC_PER_TICK: u32 = 500; // 120 BPM with 1000 ticks per beat
@@ -225,17 +225,14 @@ fn recording_loop(
 
     // Only stop on clean exit. This helps to survive temporary conditions like controller
     // not yet connected or temporarily disconnected.
-    let retry_delay = Duration::from_secs(4);
+    let retry_delay = Duration::from_secs(2);
     while let Err(err) = do_recording(stop.clone(), port_name_prefix, output_path.to_owned()) {
-        log::error!("Error: {}", err);
+        log::warn!("{}", err);
         if stop.load(Ordering::Relaxed) {
             println!();
             break;
         }
-        log::info!(
-            "Waiting for {} seconds before retry.",
-            retry_delay.as_secs()
-        );
+        log::debug!("Waiting for {} seconds before retry.", retry_delay.as_secs());
         std::thread::sleep(retry_delay);
     }
     Ok(())
@@ -250,7 +247,7 @@ fn do_recording(
     let disconnected = Arc::new(AtomicBool::new(false));
     let mut connection = connect(port_name_prefix, session.clone(), disconnected.to_owned())?;
 
-    log::info!("Recording... Press Ctrl+C to stop.");
+    log::info!("Recording...");
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_secs(1));
         if let Ok(mut session) = session.try_lock() {
@@ -290,14 +287,14 @@ fn connect(
         PACKAGE_NAME,
         move |timestamp, message, _| {
             /* WARNING: Using patched versio of `midir` to detect controller disconnection
-               with alsa backend (see git sub-module).
-               Upstream version just silently stops receiving events without any way
-               to detect this situation.
-               This can be handled in a more straightforward way by using alsa-rs directly,
-               but that would require is a lot more work, and we'll lose portability.
+              with alsa backend (see git sub-module).
+              Upstream version just silently stops receiving events (at least on ALSA)
+              without any way to detect this situation.
+              This can be handled in a more straightforward way by using alsa-rs directly,
+              but that would require is a lot more work, and we'll lose portability.
 
-               Upon port unsubscription patched midir returns empty data vector here.
-             */
+              Upon port unsubscription patched midir returns empty data vector here.
+            */
             if message.is_empty() {
                 disconnected.store(true, Ordering::Relaxed);
                 return;
@@ -339,14 +336,24 @@ fn select_port(
 }
 
 fn main() {
-    env_logger::builder()
-        .filter_level(LevelFilter::Trace)
-        .init();
-
     let matches = Command::new(PACKAGE_NAME)
         .version(env!("CARGO_PKG_VERSION"))
         .author("Petr Gladkikh")
         .about("Continuously records MIDI events from given MIDI port to file archive.")
+        .arg(
+            Arg::new("log-level")
+                .long("log-level")
+                .value_name("LEVEL")
+                .help("Set log level (trace, debug, info, warn, error). Default: trace.")
+                .value_parser(["trace", "debug", "info", "warn", "error"]),
+        )
+        .arg(
+            Arg::new("log-file")
+                .long("log-file")
+                .value_name("FILE")
+                .help("Write log output to the specified file.")
+                .value_parser(clap::value_parser!(PathBuf)),
+        )
         .arg(
             Arg::new("list")
                 .short('l')
@@ -368,13 +375,57 @@ fn main() {
                 .long("archive-dir")
                 .value_name("FILE")
                 .help(
-                    "Root directory where recorded MIDI files should be stored.\
-                          Will be created if it does not exist.",
+                    "A directory where recorded MIDI files should be stored.\
+                          It will be created if it does not exist.",
                 )
                 .value_parser(clap::value_parser!(PathBuf))
                 .required_unless_present("list"),
         )
         .get_matches();
+
+    let log_level = match matches.get_one::<String>("log-level").map(String::as_str) {
+        Some("trace") => LevelFilter::Trace,
+        Some("debug") => LevelFilter::Debug,
+        Some("info") => LevelFilter::Info,
+        Some("warn") => LevelFilter::Warn,
+        Some("error") => LevelFilter::Error,
+        _ => LevelFilter::Info,
+    };
+    let mut logger = env_logger::builder();
+    logger.filter_level(log_level);
+    if let Some(log_file_path) = matches.get_one::<PathBuf>("log-file") {
+        if let Some(dir) = log_file_path.parent() {
+            if dir.exists() {
+                if !dir.is_dir() {
+                    eprintln!("Log file location {} is not a directory.", dir.display());
+                    exit(2);
+                }
+            } else {
+                eprintln!("Creating log directory '{}'", dir.display());
+                fs::create_dir_all(&dir).expect("create log file directory");
+            }
+        }
+
+        match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_file_path)
+        {
+            Ok(file) => {
+                eprintln!("Writing log to '{}'", log_file_path.display());
+                logger.target(env_logger::Target::Pipe(Box::new(file)));
+            }
+            Err(err) => {
+                eprintln!(
+                    "Failed to open log file '{}': {}",
+                    log_file_path.display(),
+                    err
+                );
+                std::process::exit(2);
+            }
+        }
+    }
+    logger.init();
 
     let result = if matches.get_flag("list") {
         list_midi_inputs()
@@ -384,7 +435,7 @@ fn main() {
             .get_one::<PathBuf>("archive directory")
             .unwrap()
             .clone();
-
+        log::info!("Archive directory '{}'", output_path.display());
         recording_loop(port_prefix, output_path)
     };
 
