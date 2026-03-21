@@ -88,12 +88,11 @@ CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 cross build --release
 ## History
 
 Similar "Archive" function that existed in Pianoteq synthesiser when it was launched as a stand-alone program.
-This function was removed recently so I have created a replacement.
 
 This Program was initially a part of [emmate](https://github.com/PetrGlad/emmate) project but is now extracted
 here as it is also useful in itself.
 
-The program is named "blackbox" since its behaviur is somewhat similar to flight data recorders (FDR) which
+The program is named "blackbox" since its behavior is somewhat similar to flight data recorders (FDR) which
 also sometimes called "black boxes".
 
 
