@@ -351,8 +351,8 @@ impl RecordingSession {
     fn target_directory(base_path: &PathBuf, time: DateTime<Local>) -> std::io::Result<PathBuf> {
         let directory = Path::new(base_path)
             .join(time.year().to_string())
-            .join(time.month().to_string())
-            .join(time.day().to_string());
+            .join(format!("{:02}", time.month()))
+            .join(format!("{:02}", time.day()));
 
         fs::create_dir_all(&directory)?;
 
