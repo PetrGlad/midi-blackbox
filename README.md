@@ -18,6 +18,10 @@ The recorded files layout is as follows:
       * Day
         * datetime-number_of_events-duration.mid
 
+While a session is being recorded its events are also appended to `.recording.journal` in the archive root
+(synced to disk every second). If the program is killed or the computer loses power, the journal is
+converted to a regular file named `...-recovered.mid` on the next start, so at most about a second of playing is lost.
+
 Since MIDI files take very little space the program does not have any storage limits.
 
 ## Platform support
