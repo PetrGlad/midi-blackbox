@@ -556,7 +556,7 @@ fn main() {
             Arg::new("log-level")
                 .long("log-level")
                 .value_name("LEVEL")
-                .help("Set log level (trace, debug, info, warn, error). Default: trace.")
+                .help("Set log level. Default: trace.")
                 .value_parser(["trace", "debug", "info", "warn", "error"]),
         )
         .arg(
